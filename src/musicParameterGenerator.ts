@@ -21,9 +21,13 @@ export class MusicParameterGenerator {
         languageId: string,
         lineCount: number
     ): MusicParameters {
+        // NOTE: While this analyzes individual files, the generated music represents the ENTIRE CODEBASE context
+        // The audio system ensures only ONE stream plays globally across all components
+        // AUDIO CONTINUITY: Current audio keeps playing while new music is being generated
+        
         // Calculate overall complexity score factoring in both code complexity and file size
         const complexityScore = this.calculateOverallComplexityScore(analysis, lineCount);
-        console.log(`CodeBeat: Generating music parameters for ${analysis.complexity} ${languageId} code (${lineCount} lines)`);
+        console.log(`CodeBeat: Generating CODEBASE music parameters for ${analysis.complexity} ${languageId} code (${lineCount} lines)`);
         console.log(`CodeBeat: Overall complexity score: ${complexityScore}/10`);
         console.log('CodeBeat: Input analysis for music generation:', JSON.stringify(analysis, null, 2));
 

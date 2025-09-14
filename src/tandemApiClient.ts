@@ -14,7 +14,7 @@ export interface CodeAnalysis {
 
 export class TandemApiClient {
     private readonly baseUrl = 'https://api.tandemn.com/api/v1/chat/completions';
-    private readonly model = 'casperhansen/deepseek-r1-distill-llama-70b-awq';
+    private readonly model = 'Qwen/Qwen3-32B-AWQ';
 
     public async analyzeCode(
         code: string, 
@@ -43,9 +43,7 @@ export class TandemApiClient {
             console.log('\n📡 Request Payload:');
             console.log(JSON.stringify({
                 model: this.model,
-                messages: [{ role: 'user', content: prompt }],
-                temperature: 0.3,
-                max_tokens: 10000
+                messages: [{ role: 'user', content: prompt }]
             }, null, 2));
 
             const response = await fetch(this.baseUrl, {
@@ -58,9 +56,7 @@ export class TandemApiClient {
                     model: this.model,
                     messages: [
                         { role: 'user', content: prompt }
-                    ],
-                    temperature: 0.3,
-                    max_tokens: 10000
+                    ]
                 })
             });
 
@@ -89,7 +85,6 @@ export class TandemApiClient {
 
         } catch (error) {
             console.error('CodeBeat: Error calling Tandemn API:', error);
-            vscode.window.showErrorMessage(`CodeBeat: Failed to analyze code - ${error}`);
             return null;
         }
     }

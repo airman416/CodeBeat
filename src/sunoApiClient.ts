@@ -56,7 +56,7 @@ class AudioPlayer {
         // Always update current URL for potential resume after unmute
         this.currentUrl = url;
         
-        // Stop any existing audio first
+        // Stop any existing audio first (this method is now only called when we want to transition)
         await this.stopAudio();
         
         if (this.isMuted) {
@@ -102,15 +102,17 @@ class AudioPlayer {
                         this.outputChannel.appendLine(`✅ Audio playback started with ${player.name}`);
                     });
 
+                    let hasError = false;
                     this.audioProcess.on('error', (error) => {
+                        hasError = true;
                         this.outputChannel.appendLine(`❌ Audio player error (${player.name}): ${error.message}`);
                     });
 
                     this.audioProcess.on('exit', (code) => {
                         if (code === 0) {
-                            this.outputChannel.appendLine(`🎵 Audio playback completed`);
-                        } else {
-                            this.outputChannel.appendLine(`⚠️  ${player.name} exited with code: ${code} - trying next player...`);
+                            this.outputChannel.appendLine(`🎵 Audio playback completed successfully`);
+                        } else if (code !== null) {
+                            this.outputChannel.appendLine(`⚠️  ${player.name} exited with code: ${code}`);
                         }
                         this.audioProcess = null;
                     });
@@ -118,12 +120,20 @@ class AudioPlayer {
                     // Wait a moment to see if the process starts successfully
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     
-                    // If process is still running, we consider it successful
-                    if (this.audioProcess && !this.audioProcess.killed) {
+                    // If process is still running and no error occurred, we consider it successful
+                    if (this.audioProcess && !this.audioProcess.killed && !hasError) {
                         this.outputChannel.appendLine(`🎉 Successfully started ${player.name} for ${isStreamingUrl ? 'streaming' : 'direct'} playback`);
-                        break;
+                        return; // Success - exit the function
                     } else {
-                        this.outputChannel.appendLine(`⚠️  ${player.name} failed to start properly, trying next...`);
+                        if (hasError) {
+                            this.outputChannel.appendLine(`⚠️  ${player.name} had errors, trying next...`);
+                        } else {
+                            this.outputChannel.appendLine(`⚠️  ${player.name} failed to start properly, trying next...`);
+                        }
+                        if (this.audioProcess) {
+                            this.audioProcess.kill('SIGTERM');
+                            this.audioProcess = null;
+                        }
                         continue;
                     }
 
@@ -249,8 +259,55 @@ class AudioPlayer {
     public async stopAudio(): Promise<void> {
         if (this.audioProcess) {
             this.outputChannel.appendLine('⏹️  Stopping audio playback...');
+            
+            // Try graceful termination first
             this.audioProcess.kill('SIGTERM');
+            
+            // Wait a brief moment for graceful shutdown
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Force kill if still running
+            if (this.audioProcess && !this.audioProcess.killed) {
+                this.outputChannel.appendLine('🔴 Force stopping audio process...');
+                this.audioProcess.kill('SIGKILL');
+            }
+            
+            // Wait for process to actually terminate
+            if (this.audioProcess && !this.audioProcess.killed) {
+                await new Promise((resolve) => {
+                    const timeout = setTimeout(resolve, 1000);
+                    this.audioProcess?.on('exit', () => {
+                        clearTimeout(timeout);
+                        resolve(void 0);
+                    });
+                });
+            }
+            
             this.audioProcess = null;
+            this.outputChannel.appendLine('✅ Audio process stopped');
+        }
+        
+        // Additional cleanup: Kill any remaining audio processes that might be hanging
+        await this.killAnyRemainingAudioProcesses();
+    }
+
+    private async killAnyRemainingAudioProcesses(): Promise<void> {
+        try {
+            // Only kill audio processes that contain suno.ai URLs to avoid killing system audio
+            if (process.platform === 'darwin' || process.platform === 'linux') {
+                const { spawn } = require('child_process');
+                
+                // Kill processes that are playing suno.ai URLs specifically
+                const killSunoProcesses = spawn('pkill', ['-f', 'suno.ai'], { stdio: 'ignore' });
+                await new Promise(resolve => {
+                    killSunoProcesses.on('exit', resolve);
+                    setTimeout(resolve, 500); // Timeout after 500ms
+                });
+                
+                this.outputChannel.appendLine('🧹 Cleaned up any remaining Suno audio processes');
+            }
+        } catch (error) {
+            // Ignore cleanup errors - this is just a safety measure
         }
     }
 
@@ -279,6 +336,10 @@ class AudioPlayer {
         return this.isMuted;
     }
 
+    public isAudioPlaying(): boolean {
+        return this.audioProcess !== null && !this.audioProcess.killed;
+    }
+
     public dispose(): void {
         this.stopAudio();
     }
@@ -291,6 +352,7 @@ export class SunoApiClient {
     private readonly baseUrl = 'https://studio-api.prod.suno.com/api/v2/external/hackmit';
     private audioPlayer: AudioPlayer;
     private activePollingIntervals: Set<NodeJS.Timeout> = new Set();
+    private isGeneratingMusic: boolean = false; // Prevent concurrent music generation
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('CodeBeat - Suno API');
@@ -365,9 +427,29 @@ export class SunoApiClient {
         triggerType: 'code_analysis' | 'success_celebration' | 'error_feedback' | 'manual',
         codeContext?: { code: string; language: string; fileName?: string }
     ): Promise<SunoApiResponse> {
-        // CRITICAL: Stop any existing audio immediately when new music is requested
-        await this.audioPlayer.stopAudio();
+        // CRITICAL: Prevent concurrent music generation requests
+        if (this.isGeneratingMusic) {
+            this.outputChannel.appendLine('🚫 GLOBAL AUDIO CONTROL: Music generation already in progress, rejecting concurrent request');
+            return {
+                id: 'rejected_concurrent',
+                status: 'error',
+                metadata: {
+                    bpm: params.bpm,
+                    genre: params.genre,
+                    duration: params.duration,
+                    error_type: 'concurrent_request',
+                    error_message: 'Music generation already in progress'
+                }
+            };
+        }
+
+        this.isGeneratingMusic = true;
+        
+        // IMPROVED: Keep current audio playing while new music is being generated
+        // Only clear polling intervals for the new generation, don't stop current audio yet
         this.clearAllPollingIntervals();
+        const isCurrentlyPlaying = this.audioPlayer.isAudioPlaying();
+        this.outputChannel.appendLine(`🎵 AUDIO CONTINUITY: ${isCurrentlyPlaying ? 'Keeping current audio playing' : 'No current audio'} while generating new music...`);
         
         const requestId = this.generateRequestId();
         const timestamp = new Date().toISOString();
@@ -414,6 +496,7 @@ export class SunoApiClient {
             } else {
                 // Fallback to mock response if no API token
                 this.outputChannel.appendLine('⚠️  No API token available, using mock response');
+                this.outputChannel.appendLine(`🎵 AUDIO CONTINUITY: Keeping current audio playing (no API token)`);
                 
                 const mockResponse: SunoApiResponse = {
                     id: requestId,
@@ -421,18 +504,21 @@ export class SunoApiClient {
                     metadata: {
                         bpm: params.bpm,
                         genre: params.genre,
-                        duration: params.duration
+                        duration: params.duration,
+                        error_type: 'no_api_token',
+                        error_message: 'API token not configured - current audio continues'
                     }
                 };
                 
                 vscode.window.showWarningMessage(
-                    'CodeBeat: SUNO_API_TOKEN not configured. Please add it to your .env file.'
+                    'CodeBeat: SUNO_API_TOKEN not configured. Please add it to your .env file. (Current audio continues)'
                 );
                 
                 return mockResponse;
             }
         } catch (error) {
             this.outputChannel.appendLine(`❌ API Error: ${error}`);
+            this.outputChannel.appendLine(`🎵 AUDIO CONTINUITY: Keeping current audio playing after API error`);
             console.error('CodeBeat: Suno API Error:', error);
             
             // Return error response
@@ -442,9 +528,14 @@ export class SunoApiClient {
                 metadata: {
                     bpm: params.bpm,
                     genre: params.genre,
-                    duration: params.duration
+                    duration: params.duration,
+                    error_type: 'api_error',
+                    error_message: 'API call failed - current audio continues'
                 }
             };
+        } finally {
+            // CRITICAL: Always reset the generation flag
+            this.isGeneratingMusic = false;
         }
     }
 
@@ -511,9 +602,8 @@ export class SunoApiClient {
         this.outputChannel.appendLine(`\n🔄 Starting status polling for clip: ${clipId}`);
         this.outputChannel.appendLine(`📊 Status monitoring every 5 seconds...`);
         
-        // CRITICAL: Stop any existing audio immediately and clear all polling to ensure only one stream at a time
-        await this.audioPlayer.stopAudio();
-        this.clearAllPollingIntervals();
+        // IMPROVED: Don't stop current audio here - polling is already cleared in generateMusic()
+        // Audio will only be stopped when new audio is ready to play
         
         let pollCount = 0;
         const maxPolls = 60; // 5 minutes max polling
@@ -532,9 +622,12 @@ export class SunoApiClient {
                     if (status.status === 'streaming' && status.audio_url) {
                         this.outputChannel.appendLine(`\n🎵 STREAMING NOW AVAILABLE!`);
                         this.outputChannel.appendLine(`🌐 Streaming URL: ${status.audio_url}`);
-                        this.outputChannel.appendLine(`▶️  Starting automatic playback...`);
+                        this.outputChannel.appendLine(`🔄 AUDIO TRANSITION: Switching from current audio to new stream...`);
                         
-                        // Start automatic playback
+                        // NOW stop current audio and start new playback
+                        this.outputChannel.appendLine(`🔄 AUDIO TRANSITION: Stopping current audio to start streaming...`);
+                        await this.audioPlayer.stopAudio();
+                        await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause for cleanup
                         this.audioPlayer.playAudio(status.audio_url, status.title);
                         
                         // Show notification for streaming
@@ -557,13 +650,16 @@ export class SunoApiClient {
                         this.outputChannel.appendLine(`🎼 Final MP3 URL: ${status.audio_url}`);
                         this.outputChannel.appendLine(`🎵 Title: ${status.title || 'Untitled'}`);
                         this.outputChannel.appendLine(`⏱️  Duration: ${status.metadata.duration || 'Unknown'} seconds`);
-                        this.outputChannel.appendLine(`🔄 Switching to final MP3 for better quality...`);
+                        this.outputChannel.appendLine(`🔄 AUDIO TRANSITION: Switching to final MP3 for better quality...`);
                         
                         if (status.image_url) {
                             this.outputChannel.appendLine(`🖼️  Cover Art: ${status.image_url}`);
                         }
                         
-                        // Switch to final MP3 for better quality
+                        // Switch to final MP3 for better quality (stop current, start new)
+                        this.outputChannel.appendLine(`🔄 AUDIO TRANSITION: Stopping current audio to start final MP3...`);
+                        await this.audioPlayer.stopAudio();
+                        await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause for cleanup
                         this.audioPlayer.playAudio(status.audio_url, status.title);
                         
                         // Show completion notification
@@ -583,12 +679,14 @@ export class SunoApiClient {
                         });
                         
                         this.removePollingInterval(pollInterval);
+                        this.isGeneratingMusic = false; // Reset flag on completion
                         return;
                     }
                     
                     // Handle errors
                     if (status.status === 'error') {
                         this.outputChannel.appendLine(`\n❌ GENERATION FAILED!`);
+                        this.outputChannel.appendLine(`🎵 AUDIO CONTINUITY: Keeping current audio playing after generation failure`);
                         if (status.metadata.error_type) {
                             this.outputChannel.appendLine(`🚫 Error Type: ${status.metadata.error_type}`);
                         }
@@ -597,10 +695,11 @@ export class SunoApiClient {
                         }
                         
                         vscode.window.showErrorMessage(
-                            `❌ CodeBeat: Music generation failed - ${status.metadata.error_message || 'Unknown error'}`
+                            `❌ CodeBeat: Music generation failed - ${status.metadata.error_message || 'Unknown error'} (current audio continues)`
                         );
                         
                         this.removePollingInterval(pollInterval);
+                        this.isGeneratingMusic = false; // Reset flag on error
                         return;
                     }
                 }
@@ -609,7 +708,9 @@ export class SunoApiClient {
                 if (pollCount >= maxPolls) {
                     this.outputChannel.appendLine(`\n⏰ Polling timeout after ${maxPolls} attempts (5 minutes)`);
                     this.outputChannel.appendLine(`🔄 Last known status: ${status.status}`);
+                    this.outputChannel.appendLine(`🎵 AUDIO CONTINUITY: Keeping current audio playing after timeout`);
                     this.removePollingInterval(pollInterval);
+                    this.isGeneratingMusic = false; // Reset flag on timeout
                 }
                 
             } catch (error) {
@@ -618,7 +719,9 @@ export class SunoApiClient {
                 
                 // Continue polling on error, but limit retries
                 if (pollCount >= 10) {
+                    this.outputChannel.appendLine(`🎵 AUDIO CONTINUITY: Keeping current audio playing after repeated polling errors`);
                     this.removePollingInterval(pollInterval);
+                    this.isGeneratingMusic = false; // Reset flag on repeated errors
                 }
             }
         }, 5000); // Poll every 5 seconds
@@ -889,6 +992,10 @@ export class SunoApiClient {
         return this.audioPlayer.getMuteStatus();
     }
 
+    public isAudioPlaying(): boolean {
+        return this.audioPlayer.isAudioPlaying();
+    }
+
     public stopAudio(): void {
         this.audioPlayer.stopAudio();
     }
@@ -898,7 +1005,7 @@ export class SunoApiClient {
             clearInterval(interval);
         }
         this.activePollingIntervals.clear();
-        this.outputChannel.appendLine('🔄 Cleared all active polling intervals to prevent multiple audio streams');
+        this.outputChannel.appendLine('🔄 GLOBAL AUDIO CONTROL: Cleared all active polling intervals (current audio continues until new music is ready)');
     }
 
     private removePollingInterval(interval: NodeJS.Timeout): void {
@@ -907,6 +1014,9 @@ export class SunoApiClient {
     }
 
     public dispose(): void {
+        // Reset generation flag
+        this.isGeneratingMusic = false;
+        
         // Clean up all polling intervals
         this.clearAllPollingIntervals();
         
