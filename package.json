@@ -71,6 +71,12 @@
         "command": "codebeat.celebrateNow",
         "title": "Trigger Celebration",
         "category": "CodeBeat"
+      },
+      {
+        "command": "codebeat.toggleAudio",
+        "title": "Toggle Audio Mute/Unmute",
+        "category": "CodeBeat",
+        "icon": "$(mute)"
       }
     ],
     "keybindings": [
@@ -78,6 +84,12 @@
         "command": "codebeat.toggle",
         "key": "ctrl+shift+m",
         "mac": "cmd+shift+m",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "codebeat.toggleAudio",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
         "when": "editorTextFocus"
       }
     ]

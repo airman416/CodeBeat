@@ -92,16 +92,22 @@ export function activate(context: vscode.ExtensionContext) {
         successDetectionSystem.triggerCelebration('compilation_success', 'User triggered celebration');
     });
 
+    const toggleAudioCommand = vscode.commands.registerCommand('codebeat.toggleAudio', () => {
+        sunoClient.toggleAudio();
+    });
+
     // Add disposables to context
     context.subscriptions.push(
         playCommand,
         stopCommand,
         toggleCommand,
         celebrateCommand,
+        toggleAudioCommand,
         statusBarItem,
         codeMonitor,
         terminalListener,
-        diagnosticTracker
+        diagnosticTracker,
+        sunoClient
     );
 
     // Show welcome message

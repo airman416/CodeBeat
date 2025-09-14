@@ -4,6 +4,7 @@ import fetch from 'node-fetch';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
+import { spawn, ChildProcess } from 'child_process';
 
 export interface SunoApiRequest {
     prompt: string;
@@ -38,26 +39,295 @@ export interface SunoApiResponse {
     };
 }
 
+class AudioPlayer {
+    private audioProcess: ChildProcess | null = null;
+    private isMuted: boolean = false;
+    private currentUrl: string | null = null;
+    private outputChannel: vscode.OutputChannel;
+    private statusBarItem: vscode.StatusBarItem;
+
+    constructor(outputChannel: vscode.OutputChannel) {
+        this.outputChannel = outputChannel;
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        this.updateStatusBar();
+    }
+
+    public async playAudio(url: string, title?: string): Promise<void> {
+        if (this.isMuted) {
+            this.outputChannel.appendLine('🔇 Audio is muted - not playing automatically');
+            this.currentUrl = url;
+            return;
+        }
+
+        this.currentUrl = url;
+        await this.stopAudio();
+
+        this.outputChannel.appendLine(`\n🎵 Starting automatic playback...`);
+        this.outputChannel.appendLine(`🌐 URL: ${url}`);
+        
+        if (title) {
+            this.outputChannel.appendLine(`🎼 Title: ${title}`);
+        }
+
+        try {
+            // Detect if this is a streaming URL or direct MP3
+            const isStreamingUrl = url.includes('audiopipe.suno.ai') || url.includes('streaming');
+            const players = this.getAvailableAudioPlayers(isStreamingUrl);
+            
+            this.outputChannel.appendLine(`🔍 Detected ${isStreamingUrl ? 'streaming' : 'direct'} URL type`);
+            
+            for (const player of players) {
+                try {
+                    let args: string[];
+                    let command: string = player.command;
+
+                    // Special handling for curl + afplay on macOS for streaming URLs
+                    if (player.name === 'curl + afplay (macOS)' && isStreamingUrl) {
+                        // Create a command that downloads and pipes to afplay
+                        const curlCommand = `curl -s -L "${url}" | afplay -`;
+                        args = [curlCommand];
+                        this.outputChannel.appendLine(`🔄 Using curl + afplay for streaming: ${curlCommand.substring(0, 50)}...`);
+                    } else {
+                        args = [...player.args, url];
+                    }
+
+                    this.audioProcess = spawn(command, args, {
+                        stdio: ['ignore', 'pipe', 'pipe'],
+                        shell: player.name === 'curl + afplay (macOS)'
+                    });
+
+                    this.audioProcess.on('spawn', () => {
+                        this.outputChannel.appendLine(`✅ Audio playback started with ${player.name}`);
+                        this.updateStatusBar();
+                    });
+
+                    this.audioProcess.on('error', (error) => {
+                        this.outputChannel.appendLine(`❌ Audio player error (${player.name}): ${error.message}`);
+                    });
+
+                    this.audioProcess.on('exit', (code) => {
+                        if (code === 0) {
+                            this.outputChannel.appendLine(`🎵 Audio playback completed`);
+                        } else {
+                            this.outputChannel.appendLine(`⚠️  ${player.name} exited with code: ${code} - trying next player...`);
+                        }
+                        this.audioProcess = null;
+                        this.updateStatusBar();
+                    });
+
+                    // Wait a moment to see if the process starts successfully
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // If process is still running, we consider it successful
+                    if (this.audioProcess && !this.audioProcess.killed) {
+                        this.outputChannel.appendLine(`🎉 Successfully started ${player.name} for ${isStreamingUrl ? 'streaming' : 'direct'} playback`);
+                        break;
+                    } else {
+                        this.outputChannel.appendLine(`⚠️  ${player.name} failed to start properly, trying next...`);
+                        continue;
+                    }
+
+                } catch (error) {
+                    this.outputChannel.appendLine(`⚠️  Failed to start ${player.name}: ${error}`);
+                    continue;
+                }
+            }
+
+            if (!this.audioProcess) {
+                this.outputChannel.appendLine(`❌ No compatible audio player found for ${isStreamingUrl ? 'streaming' : 'direct'} URL`);
+                this.outputChannel.appendLine(`💡 Suggestion: Install ffmpeg (for ffplay) or VLC for better streaming support`);
+                this.showBrowserFallback(url);
+            }
+
+        } catch (error) {
+            this.outputChannel.appendLine(`❌ Audio playback error: ${error}`);
+            this.showBrowserFallback(url);
+        }
+    }
+
+    private getAvailableAudioPlayers(isStreamingUrl: boolean = false): Array<{command: string, args: string[], name: string}> {
+        const players = [];
+        
+        if (isStreamingUrl) {
+            // For streaming URLs, prioritize players that handle HTTP streams well
+            
+            // ffplay with streaming options (comes with ffmpeg)
+            players.push({
+                command: 'ffplay',
+                args: ['-nodisp', '-autoexit', '-loglevel', 'quiet', '-reconnect', '1', '-reconnect_streamed', '1'],
+                name: 'FFplay (streaming)'
+            });
+
+            // VLC (excellent for streaming)
+            players.push({
+                command: 'vlc',
+                args: ['--intf', 'dummy', '--play-and-exit', '--no-video'],
+                name: 'VLC (streaming)'
+            });
+
+            // mpv (great for streaming)
+            players.push({
+                command: 'mpv',
+                args: ['--no-video', '--really-quiet', '--user-agent=CodeBeat-VSCode-Extension/1.0.0'],
+                name: 'mpv (streaming)'
+            });
+
+            // curl + afplay for macOS (download then play)
+            if (process.platform === 'darwin') {
+                players.push({
+                    command: 'sh',
+                    args: ['-c'],
+                    name: 'curl + afplay (macOS)'
+                });
+            }
+        } else {
+            // For local files or direct MP3 URLs
+            
+            // ffplay (comes with ffmpeg)
+            players.push({
+                command: 'ffplay',
+                args: ['-nodisp', '-autoexit', '-loglevel', 'quiet'],
+                name: 'FFplay'
+            });
+
+            // VLC (headless)
+            players.push({
+                command: 'vlc',
+                args: ['--intf', 'dummy', '--play-and-exit'],
+                name: 'VLC'
+            });
+
+            // mpv
+            players.push({
+                command: 'mpv',
+                args: ['--no-video', '--really-quiet'],
+                name: 'mpv'
+            });
+
+            // macOS specific for local files
+            if (process.platform === 'darwin') {
+                players.unshift({
+                    command: 'afplay',
+                    args: [],
+                    name: 'afplay (macOS)'
+                });
+            }
+        }
+
+        return players;
+    }
+
+    private showBrowserFallback(url: string): void {
+        const isStreamingUrl = url.includes('audiopipe.suno.ai');
+        
+        vscode.window.showInformationMessage(
+            `🎵 CodeBeat: ${isStreamingUrl ? 'Streaming requires compatible audio player.' : 'Audio player not found.'} Opening in browser...`,
+            'Open Audio',
+            'Install ffmpeg'
+        ).then(selection => {
+            if (selection === 'Open Audio') {
+                vscode.env.openExternal(vscode.Uri.parse(url));
+            } else if (selection === 'Install ffmpeg') {
+                // Open ffmpeg installation page
+                const installUrl = process.platform === 'darwin' 
+                    ? 'https://formulae.brew.sh/formula/ffmpeg'
+                    : 'https://ffmpeg.org/download.html';
+                vscode.env.openExternal(vscode.Uri.parse(installUrl));
+            }
+        });
+        
+        this.outputChannel.appendLine(`🌐 Browser fallback: Opening ${url} in default browser`);
+        
+        if (isStreamingUrl) {
+            this.outputChannel.appendLine(`💡 For automatic playback, install one of these audio players:`);
+            this.outputChannel.appendLine(`   • ffmpeg (includes ffplay): brew install ffmpeg (macOS) or apt install ffmpeg (Linux)`);
+            this.outputChannel.appendLine(`   • VLC: https://www.videolan.org/vlc/`);
+            this.outputChannel.appendLine(`   • mpv: https://mpv.io/`);
+        }
+    }
+
+    public async stopAudio(): Promise<void> {
+        if (this.audioProcess) {
+            this.outputChannel.appendLine('⏹️  Stopping audio playback...');
+            this.audioProcess.kill('SIGTERM');
+            this.audioProcess = null;
+            this.updateStatusBar();
+        }
+    }
+
+    public toggleMute(): void {
+        this.isMuted = !this.isMuted;
+        
+        if (this.isMuted) {
+            this.outputChannel.appendLine('🔇 Audio muted - stopping playback');
+            this.stopAudio();
+        } else {
+            this.outputChannel.appendLine('🔊 Audio unmuted');
+            if (this.currentUrl) {
+                this.outputChannel.appendLine('▶️  Resuming playback...');
+                this.playAudio(this.currentUrl);
+            }
+        }
+        
+        this.updateStatusBar();
+        
+        vscode.window.showInformationMessage(
+            `🎵 CodeBeat: Audio ${this.isMuted ? 'muted' : 'unmuted'}`
+        );
+    }
+
+    public getMuteStatus(): boolean {
+        return this.isMuted;
+    }
+
+    private updateStatusBar(): void {
+        if (this.isMuted) {
+            this.statusBarItem.text = '🔇 CodeBeat';
+            this.statusBarItem.tooltip = 'CodeBeat Audio: Muted (Click to unmute)';
+        } else if (this.audioProcess) {
+            this.statusBarItem.text = '🎵 CodeBeat';
+            this.statusBarItem.tooltip = 'CodeBeat Audio: Playing (Click to mute)';
+        } else {
+            this.statusBarItem.text = '🎼 CodeBeat';
+            this.statusBarItem.tooltip = 'CodeBeat Audio: Ready (Click to mute)';
+        }
+        
+        this.statusBarItem.command = 'codebeat.toggleAudio';
+        this.statusBarItem.show();
+    }
+
+    public dispose(): void {
+        this.stopAudio();
+        this.statusBarItem.dispose();
+    }
+}
+
 export class SunoApiClient {
     private lastGeneratedId: number = 0;
     private outputChannel: vscode.OutputChannel;
     private apiToken: string | undefined;
     private readonly baseUrl = 'https://studio-api.prod.suno.com/api/v2/external/hackmit';
+    private audioPlayer: AudioPlayer;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('CodeBeat - Suno API');
         this.outputChannel.show(true);
+        
+        // Initialize audio player
+        this.audioPlayer = new AudioPlayer(this.outputChannel);
         
         // Load environment variables
         this.loadEnvVars();
         
         if (this.apiToken) {
             this.outputChannel.appendLine('🎵 CodeBeat Suno API Client Initialized');
-            this.outputChannel.appendLine('✅ API Token loaded successfully\n');
+            this.outputChannel.appendLine('✅ API Token loaded successfully');
+            this.outputChannel.appendLine('🎼 Audio player ready for automatic playback\n');
         } else {
             this.outputChannel.appendLine('🎵 CodeBeat Suno API Client Initialized');
             this.outputChannel.appendLine('⚠️  WARNING: SUNO_API_TOKEN not found in .env file');
-            this.outputChannel.appendLine('Please add SUNO_API_TOKEN=your_token to your .env file\n');
+            this.outputChannel.appendLine('Please add SUNO_API_TOKEN=your_token to your .env file');
+            this.outputChannel.appendLine('🎼 Audio player ready for automatic playback\n');
         }
     }
 
@@ -142,6 +412,9 @@ export class SunoApiClient {
             // Make real API call if token is available
             if (this.apiToken) {
                 const response = await this.makeApiCall(sunoRequest);
+                
+                // Start polling for status updates and streaming
+                this.startPollingForStatus(response.id, triggerType, params);
                 
                 // Show notification for important events
                 if (triggerType === 'success_celebration') {
@@ -228,14 +501,245 @@ export class SunoApiClient {
         // Convert API response to our format
         return {
             id: responseData.id || this.generateRequestId(),
-            status: responseData.status || 'queued',
+            status: responseData.status || 'submitted',
             audio_url: responseData.audio_url,
+            title: responseData.title,
+            image_url: responseData.image_url,
+            created_at: responseData.created_at,
             metadata: {
                 bpm: request.bpm,
                 genre: request.genre,
-                duration: request.duration
+                duration: request.duration,
+                tags: responseData.metadata?.tags,
+                prompt: responseData.metadata?.prompt
             }
         };
+    }
+
+    private async startPollingForStatus(
+        clipId: string, 
+        triggerType: string, 
+        params: MusicParameters
+    ): Promise<void> {
+        this.outputChannel.appendLine(`\n🔄 Starting status polling for clip: ${clipId}`);
+        this.outputChannel.appendLine(`📊 Status monitoring every 5 seconds...`);
+        
+        let pollCount = 0;
+        const maxPolls = 60; // 5 minutes max polling
+        let lastStatus = '';
+        
+        const pollInterval = setInterval(async () => {
+            try {
+                pollCount++;
+                const status = await this.checkClipStatus(clipId);
+                
+                if (status.status !== lastStatus) {
+                    this.logStatusChange(clipId, lastStatus, status.status, status, pollCount);
+                    lastStatus = status.status;
+                    
+                    // Handle streaming availability
+                    if (status.status === 'streaming' && status.audio_url) {
+                        this.outputChannel.appendLine(`\n🎵 STREAMING NOW AVAILABLE!`);
+                        this.outputChannel.appendLine(`🌐 Streaming URL: ${status.audio_url}`);
+                        this.outputChannel.appendLine(`▶️  Starting automatic playback...`);
+                        
+                        // Start automatic playback
+                        this.audioPlayer.playAudio(status.audio_url, status.title);
+                        
+                        // Show notification for streaming
+                        vscode.window.showInformationMessage(
+                            `🎵 CodeBeat: Music is now streaming! (${params.genre} - ${params.bpm} BPM)`,
+                            'Mute Audio',
+                            'Open in Browser'
+                        ).then(selection => {
+                            if (selection === 'Mute Audio') {
+                                this.audioPlayer.toggleMute();
+                            } else if (selection === 'Open in Browser' && status.audio_url) {
+                                vscode.env.openExternal(vscode.Uri.parse(status.audio_url));
+                            }
+                        });
+                    }
+                    
+                    // Handle completion
+                    if (status.status === 'complete' && status.audio_url) {
+                        this.outputChannel.appendLine(`\n✅ GENERATION COMPLETE!`);
+                        this.outputChannel.appendLine(`🎼 Final MP3 URL: ${status.audio_url}`);
+                        this.outputChannel.appendLine(`🎵 Title: ${status.title || 'Untitled'}`);
+                        this.outputChannel.appendLine(`⏱️  Duration: ${status.metadata.duration || 'Unknown'} seconds`);
+                        this.outputChannel.appendLine(`🔄 Switching to final MP3 for better quality...`);
+                        
+                        if (status.image_url) {
+                            this.outputChannel.appendLine(`🖼️  Cover Art: ${status.image_url}`);
+                        }
+                        
+                        // Switch to final MP3 for better quality
+                        this.audioPlayer.playAudio(status.audio_url, status.title);
+                        
+                        // Show completion notification
+                        vscode.window.showInformationMessage(
+                            `✅ CodeBeat: Music generation complete! "${status.title || 'Your Track'}"`,
+                            'Mute Audio',
+                            'Download MP3',
+                            'View Cover Art'
+                        ).then(selection => {
+                            if (selection === 'Mute Audio') {
+                                this.audioPlayer.toggleMute();
+                            } else if (selection === 'Download MP3' && status.audio_url) {
+                                vscode.env.openExternal(vscode.Uri.parse(status.audio_url));
+                            } else if (selection === 'View Cover Art' && status.image_url) {
+                                vscode.env.openExternal(vscode.Uri.parse(status.image_url));
+                            }
+                        });
+                        
+                        clearInterval(pollInterval);
+                        return;
+                    }
+                    
+                    // Handle errors
+                    if (status.status === 'error') {
+                        this.outputChannel.appendLine(`\n❌ GENERATION FAILED!`);
+                        if (status.metadata.error_type) {
+                            this.outputChannel.appendLine(`🚫 Error Type: ${status.metadata.error_type}`);
+                        }
+                        if (status.metadata.error_message) {
+                            this.outputChannel.appendLine(`💬 Error Message: ${status.metadata.error_message}`);
+                        }
+                        
+                        vscode.window.showErrorMessage(
+                            `❌ CodeBeat: Music generation failed - ${status.metadata.error_message || 'Unknown error'}`
+                        );
+                        
+                        clearInterval(pollInterval);
+                        return;
+                    }
+                }
+                
+                // Stop polling after max attempts
+                if (pollCount >= maxPolls) {
+                    this.outputChannel.appendLine(`\n⏰ Polling timeout after ${maxPolls} attempts (5 minutes)`);
+                    this.outputChannel.appendLine(`🔄 Last known status: ${status.status}`);
+                    clearInterval(pollInterval);
+                }
+                
+            } catch (error) {
+                this.outputChannel.appendLine(`❌ Polling error: ${error}`);
+                console.error('CodeBeat: Status polling error:', error);
+                
+                // Continue polling on error, but limit retries
+                if (pollCount >= 10) {
+                    clearInterval(pollInterval);
+                }
+            }
+        }, 5000); // Poll every 5 seconds
+    }
+
+    private async checkClipStatus(clipId: string): Promise<SunoApiResponse> {
+        if (!this.apiToken) {
+            throw new Error('API token not available');
+        }
+
+        const headers = {
+            'Authorization': `Bearer ${this.apiToken}`,
+            'User-Agent': 'CodeBeat-VSCode-Extension/1.0.0'
+        };
+
+        const response = await fetch(`${this.baseUrl}/clips?ids=${clipId}`, {
+            method: 'GET',
+            headers
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Clips API Error: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+
+        const responseData = await response.json() as any[];
+        
+        if (!responseData || responseData.length === 0) {
+            throw new Error('No clip data returned from API');
+        }
+
+        const clipData = responseData[0]; // Get first clip from array
+        
+        return {
+            id: clipData.id,
+            status: clipData.status,
+            audio_url: clipData.audio_url,
+            title: clipData.title,
+            image_url: clipData.image_url,
+            created_at: clipData.created_at,
+            metadata: {
+                bpm: clipData.metadata?.bpm || 0,
+                genre: clipData.metadata?.genre || '',
+                duration: clipData.metadata?.duration || 0,
+                tags: clipData.metadata?.tags,
+                prompt: clipData.metadata?.prompt,
+                error_type: clipData.metadata?.error_type,
+                error_message: clipData.metadata?.error_message
+            }
+        };
+    }
+
+    private logStatusChange(
+        clipId: string, 
+        oldStatus: string, 
+        newStatus: string, 
+        fullStatus: SunoApiResponse, 
+        pollCount: number
+    ): void {
+        const timestamp = new Date().toISOString();
+        
+        this.outputChannel.appendLine(`\n${'─'.repeat(60)}`);
+        this.outputChannel.appendLine(`📊 STATUS UPDATE #${pollCount} - ${timestamp}`);
+        this.outputChannel.appendLine(`🆔 Clip ID: ${clipId}`);
+        
+        if (oldStatus) {
+            this.outputChannel.appendLine(`📈 Status Change: ${oldStatus.toUpperCase()} → ${newStatus.toUpperCase()}`);
+        } else {
+            this.outputChannel.appendLine(`📊 Initial Status: ${newStatus.toUpperCase()}`);
+        }
+        
+        // Show status-specific information
+        switch (newStatus) {
+            case 'submitted':
+                this.outputChannel.appendLine(`⏳ Request received and queued for processing`);
+                break;
+            case 'queued':
+                this.outputChannel.appendLine(`⏳ Waiting for processing to begin`);
+                break;
+            case 'streaming':
+                this.outputChannel.appendLine(`🎵 Generation in progress - STREAMING AVAILABLE!`);
+                if (fullStatus.audio_url) {
+                    this.outputChannel.appendLine(`▶️  Stream URL: ${fullStatus.audio_url}`);
+                }
+                if (fullStatus.title) {
+                    this.outputChannel.appendLine(`🎼 Title: ${fullStatus.title}`);
+                }
+                break;
+            case 'complete':
+                this.outputChannel.appendLine(`✅ Generation finished - FINAL MP3 READY!`);
+                if (fullStatus.audio_url) {
+                    this.outputChannel.appendLine(`🎵 Download URL: ${fullStatus.audio_url}`);
+                }
+                if (fullStatus.title) {
+                    this.outputChannel.appendLine(`🎼 Title: ${fullStatus.title}`);
+                }
+                if (fullStatus.metadata.duration) {
+                    this.outputChannel.appendLine(`⏱️  Duration: ${fullStatus.metadata.duration} seconds`);
+                }
+                break;
+            case 'error':
+                this.outputChannel.appendLine(`❌ Generation failed`);
+                if (fullStatus.metadata.error_type) {
+                    this.outputChannel.appendLine(`🚫 Error Type: ${fullStatus.metadata.error_type}`);
+                }
+                if (fullStatus.metadata.error_message) {
+                    this.outputChannel.appendLine(`💬 Error: ${fullStatus.metadata.error_message}`);
+                }
+                break;
+        }
+        
+        this.outputChannel.appendLine(`${'─'.repeat(60)}`);
     }
 
     public async generateCelebration(
@@ -297,6 +801,8 @@ export class SunoApiClient {
         this.outputChannel.appendLine(`• Request ID: ${requestId}`);
         this.outputChannel.appendLine(`• API Status: ${this.apiToken ? 'Ready' : 'Token Missing'}`);
         this.outputChannel.appendLine(`• Expected Duration: ${request.duration} seconds`);
+        this.outputChannel.appendLine(`• Real-time Streaming: ENABLED ⚡`);
+        this.outputChannel.appendLine(`• Status Polling: Every 5 seconds 🔄`);
         
         // Show the API endpoint being used
         this.outputChannel.appendLine('\n🌐 API ENDPOINT:');
@@ -305,6 +811,11 @@ export class SunoApiClient {
         this.outputChannel.appendLine(`  "Authorization": "Bearer ${this.apiToken ? '***' + this.apiToken.slice(-4) : 'NOT_SET'}",`);
         this.outputChannel.appendLine(`  "Content-Type": "application/json"`);
         this.outputChannel.appendLine(`}`);
+
+        this.outputChannel.appendLine('\n🎵 STREAMING TIMELINE:');
+        this.outputChannel.appendLine(`• 0-30s: Status will change to SUBMITTED → QUEUED`);
+        this.outputChannel.appendLine(`• 30-60s: Status will change to STREAMING (audio available!) 🎵`);
+        this.outputChannel.appendLine(`• 1-2 min: Status will change to COMPLETE (final MP3 ready) ✅`);
 
         this.outputChannel.appendLine(`\n${'='.repeat(80)}\n`);
     }
@@ -376,7 +887,20 @@ export class SunoApiClient {
         return `codebeat_${timestamp}_${this.lastGeneratedId.toString().padStart(3, '0')}`;
     }
 
+    public toggleAudio(): void {
+        this.audioPlayer.toggleMute();
+    }
+
+    public getMuteStatus(): boolean {
+        return this.audioPlayer.getMuteStatus();
+    }
+
+    public stopAudio(): void {
+        this.audioPlayer.stopAudio();
+    }
+
     public dispose(): void {
+        this.audioPlayer.dispose();
         this.outputChannel.dispose();
     }
 }
