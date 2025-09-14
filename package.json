@@ -1,0 +1,76 @@
+{
+  "name": "codebeat",
+  "displayName": "CodeBeat - Music-Driven Programming",
+  "description": "A VSCode extension that generates music using AI to match your coding flow",
+  "version": "1.0.0",
+  "publisher": "codebeat",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "CodeBeat",
+      "properties": {
+        "codebeat.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/Disable CodeBeat music generation"
+        },
+        "codebeat.volume": {
+          "type": "number",
+          "default": 50,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Music volume (0-100%)"
+        },
+        "codebeat.celebrationDrops": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable success celebrations"
+        },
+        "codebeat.analysisSensitivity": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 500,
+          "maximum": 10000,
+          "description": "How often to analyze code changes (milliseconds)"
+        },
+        "codebeat.tandemApiKey": {
+          "type": "string",
+          "default": "gk-xUz3DGCo_tgmkl0cszsh",
+          "description": "Tandemn API key for code analysis"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "codebeat.toggle",
+        "title": "Toggle CodeBeat",
+        "category": "CodeBeat"
+      },
+      {
+        "command": "codebeat.celebrateNow",
+        "title": "Trigger Celebration",
+        "category": "CodeBeat"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "18.x",
+    "typescript": "^4.9.4"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.12"
+  }
+}
