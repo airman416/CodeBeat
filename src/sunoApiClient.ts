@@ -365,6 +365,10 @@ export class SunoApiClient {
         triggerType: 'code_analysis' | 'success_celebration' | 'error_feedback' | 'manual',
         codeContext?: { code: string; language: string; fileName?: string }
     ): Promise<SunoApiResponse> {
+        // CRITICAL: Stop any existing audio immediately when new music is requested
+        await this.audioPlayer.stopAudio();
+        this.clearAllPollingIntervals();
+        
         const requestId = this.generateRequestId();
         const timestamp = new Date().toISOString();
 
@@ -507,7 +511,8 @@ export class SunoApiClient {
         this.outputChannel.appendLine(`\n🔄 Starting status polling for clip: ${clipId}`);
         this.outputChannel.appendLine(`📊 Status monitoring every 5 seconds...`);
         
-        // Clear any existing polling intervals to prevent multiple audio streams
+        // CRITICAL: Stop any existing audio immediately and clear all polling to ensure only one stream at a time
+        await this.audioPlayer.stopAudio();
         this.clearAllPollingIntervals();
         
         let pollCount = 0;

@@ -21,7 +21,10 @@ export class MusicParameterGenerator {
         languageId: string,
         lineCount: number
     ): MusicParameters {
-        console.log(`CodeBeat: Generating music parameters for ${analysis.complexity} ${languageId} code`);
+        // Calculate overall complexity score factoring in both code complexity and file size
+        const complexityScore = this.calculateOverallComplexityScore(analysis, lineCount);
+        console.log(`CodeBeat: Generating music parameters for ${analysis.complexity} ${languageId} code (${lineCount} lines)`);
+        console.log(`CodeBeat: Overall complexity score: ${complexityScore}/10`);
         console.log('CodeBeat: Input analysis for music generation:', JSON.stringify(analysis, null, 2));
 
         const baseParams = this.getBaseParameters(analysis);
@@ -84,30 +87,39 @@ export class MusicParameterGenerator {
     }
 
     private getBaseParameters(analysis: CodeAnalysis): MusicParameters {
+        // Enhanced complexity mappings with more aggressive stress-inducing parameters
         const complexityMappings = {
             'simple': {
-                bpm: [60, 80],
-                energy: [2, 4],
-                instruments: ['piano', 'ambient pad', 'soft strings'],
-                genre: 'ambient calm'
+                bpm: [50, 70],  // Very relaxed, slow pace
+                energy: [1, 3],  // Very low energy
+                instruments: ['soft piano', 'ambient pad', 'gentle strings', 'nature sounds'],
+                genre: 'meditative ambient',
+                stressFactor: 0.1,  // Minimal stress
+                tension: 'minimal'
             },
             'moderate': {
-                bpm: [80, 100],
-                energy: [4, 6],
-                instruments: ['piano', 'strings', 'light percussion'],
-                genre: 'focused ambient'
+                bpm: [70, 95],  // Moderately paced
+                energy: [3, 5],  // Moderate energy
+                instruments: ['piano', 'strings', 'light percussion', 'soft synth'],
+                genre: 'focused ambient',
+                stressFactor: 0.3,  // Light stress
+                tension: 'building'
             },
             'complex': {
-                bpm: [90, 120],
-                energy: [6, 8],
-                instruments: ['synth', 'strings', 'percussion', 'bass'],
-                genre: 'progressive electronic'
+                bpm: [95, 130],  // Fast, urgent pace
+                energy: [5, 8],  // High energy
+                instruments: ['synth', 'strings', 'percussion', 'bass', 'electronic beats'],
+                genre: 'intense progressive',
+                stressFactor: 0.6,  // Moderate stress
+                tension: 'escalating'
             },
             'very_complex': {
-                bpm: [100, 140],
-                energy: [7, 10],
-                instruments: ['orchestral', 'electronic', 'heavy percussion'],
-                genre: 'intense cinematic'
+                bpm: [130, 180],  // Very fast, extremely urgent
+                energy: [8, 10],  // Maximum energy
+                instruments: ['heavy orchestral', 'industrial percussion', 'distorted synth', 'intense bass', 'urgent strings'],
+                genre: 'high-stress cinematic',
+                stressFactor: 0.9,  // High stress
+                tension: 'overwhelming'
             }
         };
 
@@ -124,7 +136,7 @@ export class MusicParameterGenerator {
             instruments: mapping.instruments,
             structure: this.getStructureForComplexity(analysis.complexity),
             duration: 60, // Default 1 minute
-            tags: [analysis.codeType, analysis.complexity, analysis.mood],
+            tags: [analysis.codeType, analysis.complexity, analysis.mood, mapping.tension],
             prompt: '',
             context: 'code_analysis'
         };
@@ -189,15 +201,44 @@ export class MusicParameterGenerator {
 
         const langMods = languageModifications[languageId] || {};
 
-        // File size modifications
+        // File size modifications with stress multipliers
         const sizeModifier = this.getSizeModifier(lineCount);
+        
+        // Apply stress multiplier to both BPM and energy
+        const baseBpm = langMods.bpm || params.bpm;
+        const baseEnergy = langMods.energy || params.energy;
+        
+        const adjustedBpm = Math.max(40, Math.min(200, baseBpm + sizeModifier.bpmAdjustment));
+        const adjustedEnergy = Math.max(1, Math.min(10, (baseEnergy + sizeModifier.energyAdjustment) * sizeModifier.stressMultiplier));
+        
+        // For very large files, make the music more chaotic and stressful
+        let adjustedInstruments = langMods.instruments || params.instruments;
+        let adjustedGenre = langMods.genre || params.genre;
+        
+        if (lineCount >= 50) {
+            // Add stress-inducing elements for LONG files (50+ lines)
+            adjustedInstruments = [...adjustedInstruments, 'urgent percussion', 'building tension'];
+            if (lineCount >= 150) {
+                // VERY LONG files (150+ lines) get much more stressful elements
+                adjustedInstruments.push('rapid percussion', 'tense strings', 'escalating intensity');
+                adjustedGenre = 'high-tension ' + adjustedGenre;
+                if (lineCount >= 300) {
+                    // Extremely large files get maximum stress elements
+                    adjustedInstruments.push('dissonant harmonies', 'urgent brass', 'overwhelming orchestral');
+                    adjustedGenre = 'overwhelming ' + adjustedGenre;
+                }
+            }
+        }
         
         return {
             ...params,
             ...langMods,
-            bpm: langMods.bpm || (params.bpm + sizeModifier.bpmAdjustment),
-            energy: Math.max(1, Math.min(10, (langMods.energy || params.energy) + sizeModifier.energyAdjustment)),
-            duration: sizeModifier.duration
+            bpm: adjustedBpm,
+            energy: adjustedEnergy,
+            duration: sizeModifier.duration,
+            instruments: adjustedInstruments,
+            genre: adjustedGenre,
+            tags: [...(params.tags || []), `${lineCount}_lines`, sizeModifier.stressMultiplier > 1.2 ? 'high_stress' : 'manageable']
         };
     }
 
@@ -266,47 +307,160 @@ export class MusicParameterGenerator {
         return 'low';
     }
 
-    private getSizeModifier(lineCount: number): { bpmAdjustment: number; energyAdjustment: number; duration: number } {
-        if (lineCount < 50) {
-            return { bpmAdjustment: -5, energyAdjustment: -1, duration: 30 };
-        } else if (lineCount < 200) {
-            return { bpmAdjustment: 0, energyAdjustment: 0, duration: 60 };
+    private getSizeModifier(lineCount: number): { bpmAdjustment: number; energyAdjustment: number; duration: number; stressMultiplier: number } {
+        // Much more aggressive size-based modifications - stress kicks in much earlier
+        if (lineCount < 25) {
+            // Very short files - relaxed
+            return { 
+                bpmAdjustment: -15, 
+                energyAdjustment: -1, 
+                duration: 25,
+                stressMultiplier: 0.6  // Relaxed but not extremely so
+            };
+        } else if (lineCount < 50) {
+            // Short files - neutral (this is the threshold for "long")
+            return { 
+                bpmAdjustment: 0, 
+                energyAdjustment: 0, 
+                duration: 40,
+                stressMultiplier: 0.9  // Almost neutral
+            };
+        } else if (lineCount < 100) {
+            // LONG files (50+) - starting to get stressful 
+            return { 
+                bpmAdjustment: 20, 
+                energyAdjustment: 2, 
+                duration: 60,
+                stressMultiplier: 1.4  // Noticeably stressful
+            };
+        } else if (lineCount < 150) {
+            // LONG files getting more stressful
+            return { 
+                bpmAdjustment: 35, 
+                energyAdjustment: 3, 
+                duration: 75,
+                stressMultiplier: 1.8  // Quite stressful
+            };
+        } else if (lineCount < 300) {
+            // VERY LONG files (150+) - very stressful
+            return { 
+                bpmAdjustment: 50, 
+                energyAdjustment: 4, 
+                duration: 90,
+                stressMultiplier: 2.2  // Very stressful
+            };
         } else if (lineCount < 500) {
-            return { bpmAdjustment: 5, energyAdjustment: 1, duration: 90 };
+            // VERY LONG files - extremely stressful
+            return { 
+                bpmAdjustment: 70, 
+                energyAdjustment: 5, 
+                duration: 120,
+                stressMultiplier: 2.7  // Extremely stressful
+            };
         } else {
-            return { bpmAdjustment: 10, energyAdjustment: 2, duration: 120 };
+            // MASSIVE files - overwhelming stress
+            return { 
+                bpmAdjustment: 90, 
+                energyAdjustment: 6, 
+                duration: 150,
+                stressMultiplier: 3.0  // Maximum stress
+            };
         }
     }
 
     private getStructureForComplexity(complexity: string): string {
         const structures = {
-            'simple': 'gentle flowing melody',
-            'moderate': 'building progression with variations',
-            'complex': 'layered composition with dynamic changes',
-            'very_complex': 'epic orchestral journey with multiple movements'
+            'simple': 'peaceful flowing melody with minimal changes',
+            'moderate': 'gentle building progression with subtle variations',
+            'complex': 'layered composition with escalating tension and rapid dynamic changes',
+            'very_complex': 'intense chaotic orchestral journey with overwhelming multiple movements and urgent tempo shifts'
         };
         return structures[complexity as keyof typeof structures] || 'ambient soundscape';
     }
 
     private generatePrompt(params: MusicParameters, analysis: CodeAnalysis | null): MusicParameters {
-        const context = analysis ? `for ${analysis.codeType} code` : 'for development feedback';
+        // Determine stress level based on tags and complexity - much more sensitive triggers
+        const isHighStress = params.tags.includes('high_stress');
+        const hasLongFile = params.tags.some(tag => tag.includes('_lines') && parseInt(tag.split('_')[0]) >= 50);   // Long at 50+ lines
+        const hasVeryLongFile = params.tags.some(tag => tag.includes('_lines') && parseInt(tag.split('_')[0]) >= 150); // Very long at 150+ lines
+        const isComplexOrHigher = params.complexity === 'complex' || params.complexity === 'very_complex';
+        const isVeryComplex = params.complexity === 'very_complex';
         
-        let prompt = `Create ${params.genre} music at ${params.bpm} BPM with ${params.mood} mood ${context}. `;
-        prompt += `Energy level ${params.energy}/10. `;
-        prompt += `Use instruments: ${params.instruments.join(', ')}. `;
-        prompt += `Structure: ${params.structure}. `;
+        // Create a more concise prompt to stay under API limits
+        let prompt = `${params.genre} at ${params.bpm} BPM, ${params.mood} mood. `;
         
-        if (analysis?.description) {
-            prompt += `Context: ${analysis.description}. `;
+        // Add stress-specific descriptors - much more aggressive triggers but concise
+        if (isHighStress || hasVeryLongFile || isVeryComplex) {
+            prompt += `URGENT, overwhelming stress. `;
+        } else if (hasLongFile || isComplexOrHigher) {
+            prompt += `Building tension and stress. `;
+        } else if (params.bpm < 70) {
+            prompt += `Calm and peaceful. `;
         }
         
-        prompt += `Duration: ${params.duration} seconds. `;
-        prompt += `Tags: ${params.tags.join(', ')}.`;
+        // Simplified instrument list - take key instruments only
+        const keyInstruments = this.getKeyInstruments(params.instruments, isHighStress || hasVeryLongFile);
+        prompt += `Instruments: ${keyInstruments.join(', ')}. `;
+        
+        // Simplified structure
+        if (isVeryComplex || isHighStress || hasVeryLongFile) {
+            prompt += `Overwhelming complexity. `;
+        } else if (isComplexOrHigher || hasLongFile) {
+            prompt += `Mounting tension. `;
+        } else if (params.complexity === 'simple' && !hasLongFile) {
+            prompt += `Simple and gentle. `;
+        }
+        
+        prompt += `Energy ${params.energy}/10, ${params.duration}s duration.`;
 
         return {
             ...params,
             prompt
         };
+    }
+
+    private getKeyInstruments(instruments: string[], isHighStress: boolean): string[] {
+        // Limit to 4-5 key instruments to keep prompt short
+        if (isHighStress) {
+            return instruments.filter(inst => 
+                inst.includes('percussion') || 
+                inst.includes('strings') || 
+                inst.includes('brass') ||
+                inst.includes('orchestral') ||
+                inst.includes('piano')
+            ).slice(0, 4);
+        } else {
+            return instruments.slice(0, 4);
+        }
+    }
+
+    private calculateOverallComplexityScore(analysis: CodeAnalysis, lineCount: number): number {
+        // Base complexity score from code analysis - more aggressive scaling
+        const complexityMap = {
+            'simple': 3,      // Increased from 2
+            'moderate': 5,    // Increased from 4  
+            'complex': 8,     // Increased from 7
+            'very_complex': 10 // Increased from 9
+        };
+        let baseScore = complexityMap[analysis.complexity] || 6;
+        
+        // Much more aggressive size multiplier - stress kicks in earlier and harder
+        let sizeMultiplier = 1.0;
+        if (lineCount < 25) sizeMultiplier = 0.7;       // Short files are somewhat relaxing
+        else if (lineCount < 50) sizeMultiplier = 1.0;  // Neutral at 50 lines
+        else if (lineCount < 100) sizeMultiplier = 1.6; // LONG files (50+) get stressful quickly
+        else if (lineCount < 150) sizeMultiplier = 2.2; // Getting very stressful
+        else if (lineCount < 300) sizeMultiplier = 2.8; // VERY LONG files (150+) are very stressful
+        else if (lineCount < 500) sizeMultiplier = 3.5; // Extremely stressful
+        else sizeMultiplier = 4.0;                      // Maximum stress for massive files
+        
+        // Energy contribution boosted for more impact
+        const energyContribution = (analysis.energy || 5) * 0.2; // Doubled from 0.1
+        
+        // Calculate final score with more aggressive scaling
+        const finalScore = Math.min(10, Math.max(1, (baseScore * sizeMultiplier) + energyContribution));
+        
+        return Math.round(finalScore * 10) / 10; // Round to 1 decimal place
     }
 
     private randomInRange(min: number, max: number): number {
