@@ -44,23 +44,25 @@ class AudioPlayer {
     private isMuted: boolean = false;
     private currentUrl: string | null = null;
     private outputChannel: vscode.OutputChannel;
-    private statusBarItem: vscode.StatusBarItem;
 
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
-        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        this.updateStatusBar();
+        // Status bar is now managed centrally in extension.ts
+        // this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        // this.updateStatusBar();
     }
 
     public async playAudio(url: string, title?: string): Promise<void> {
+        // Always update current URL for potential resume after unmute
+        this.currentUrl = url;
+        
+        // Stop any existing audio first
+        await this.stopAudio();
+        
         if (this.isMuted) {
             this.outputChannel.appendLine('🔇 Audio is muted - not playing automatically');
-            this.currentUrl = url;
             return;
         }
-
-        this.currentUrl = url;
-        await this.stopAudio();
 
         this.outputChannel.appendLine(`\n🎵 Starting automatic playback...`);
         this.outputChannel.appendLine(`🌐 URL: ${url}`);
@@ -98,7 +100,6 @@ class AudioPlayer {
 
                     this.audioProcess.on('spawn', () => {
                         this.outputChannel.appendLine(`✅ Audio playback started with ${player.name}`);
-                        this.updateStatusBar();
                     });
 
                     this.audioProcess.on('error', (error) => {
@@ -112,7 +113,6 @@ class AudioPlayer {
                             this.outputChannel.appendLine(`⚠️  ${player.name} exited with code: ${code} - trying next player...`);
                         }
                         this.audioProcess = null;
-                        this.updateStatusBar();
                     });
 
                     // Wait a moment to see if the process starts successfully
@@ -251,7 +251,6 @@ class AudioPlayer {
             this.outputChannel.appendLine('⏹️  Stopping audio playback...');
             this.audioProcess.kill('SIGTERM');
             this.audioProcess = null;
-            this.updateStatusBar();
         }
     }
 
@@ -260,16 +259,16 @@ class AudioPlayer {
         
         if (this.isMuted) {
             this.outputChannel.appendLine('🔇 Audio muted - stopping playback');
+            // Immediately stop audio when muted
             this.stopAudio();
         } else {
             this.outputChannel.appendLine('🔊 Audio unmuted');
             if (this.currentUrl) {
                 this.outputChannel.appendLine('▶️  Resuming playback...');
+                // Resume playback with the last URL
                 this.playAudio(this.currentUrl);
             }
         }
-        
-        this.updateStatusBar();
         
         vscode.window.showInformationMessage(
             `🎵 CodeBeat: Audio ${this.isMuted ? 'muted' : 'unmuted'}`
@@ -280,25 +279,8 @@ class AudioPlayer {
         return this.isMuted;
     }
 
-    private updateStatusBar(): void {
-        if (this.isMuted) {
-            this.statusBarItem.text = '🔇 CodeBeat';
-            this.statusBarItem.tooltip = 'CodeBeat Audio: Muted (Click to unmute)';
-        } else if (this.audioProcess) {
-            this.statusBarItem.text = '🎵 CodeBeat';
-            this.statusBarItem.tooltip = 'CodeBeat Audio: Playing (Click to mute)';
-        } else {
-            this.statusBarItem.text = '🎼 CodeBeat';
-            this.statusBarItem.tooltip = 'CodeBeat Audio: Ready (Click to mute)';
-        }
-        
-        this.statusBarItem.command = 'codebeat.toggleAudio';
-        this.statusBarItem.show();
-    }
-
     public dispose(): void {
         this.stopAudio();
-        this.statusBarItem.dispose();
     }
 }
 
@@ -308,6 +290,7 @@ export class SunoApiClient {
     private apiToken: string | undefined;
     private readonly baseUrl = 'https://studio-api.prod.suno.com/api/v2/external/hackmit';
     private audioPlayer: AudioPlayer;
+    private activePollingIntervals: Set<NodeJS.Timeout> = new Set();
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('CodeBeat - Suno API');
@@ -524,6 +507,9 @@ export class SunoApiClient {
         this.outputChannel.appendLine(`\n🔄 Starting status polling for clip: ${clipId}`);
         this.outputChannel.appendLine(`📊 Status monitoring every 5 seconds...`);
         
+        // Clear any existing polling intervals to prevent multiple audio streams
+        this.clearAllPollingIntervals();
+        
         let pollCount = 0;
         const maxPolls = 60; // 5 minutes max polling
         let lastStatus = '';
@@ -591,7 +577,7 @@ export class SunoApiClient {
                             }
                         });
                         
-                        clearInterval(pollInterval);
+                        this.removePollingInterval(pollInterval);
                         return;
                     }
                     
@@ -609,7 +595,7 @@ export class SunoApiClient {
                             `❌ CodeBeat: Music generation failed - ${status.metadata.error_message || 'Unknown error'}`
                         );
                         
-                        clearInterval(pollInterval);
+                        this.removePollingInterval(pollInterval);
                         return;
                     }
                 }
@@ -618,7 +604,7 @@ export class SunoApiClient {
                 if (pollCount >= maxPolls) {
                     this.outputChannel.appendLine(`\n⏰ Polling timeout after ${maxPolls} attempts (5 minutes)`);
                     this.outputChannel.appendLine(`🔄 Last known status: ${status.status}`);
-                    clearInterval(pollInterval);
+                    this.removePollingInterval(pollInterval);
                 }
                 
             } catch (error) {
@@ -627,10 +613,13 @@ export class SunoApiClient {
                 
                 // Continue polling on error, but limit retries
                 if (pollCount >= 10) {
-                    clearInterval(pollInterval);
+                    this.removePollingInterval(pollInterval);
                 }
             }
         }, 5000); // Poll every 5 seconds
+        
+        // Track this polling interval to manage cleanup
+        this.activePollingIntervals.add(pollInterval);
     }
 
     private async checkClipStatus(clipId: string): Promise<SunoApiResponse> {
@@ -899,7 +888,24 @@ export class SunoApiClient {
         this.audioPlayer.stopAudio();
     }
 
+    private clearAllPollingIntervals(): void {
+        for (const interval of this.activePollingIntervals) {
+            clearInterval(interval);
+        }
+        this.activePollingIntervals.clear();
+        this.outputChannel.appendLine('🔄 Cleared all active polling intervals to prevent multiple audio streams');
+    }
+
+    private removePollingInterval(interval: NodeJS.Timeout): void {
+        clearInterval(interval);
+        this.activePollingIntervals.delete(interval);
+    }
+
     public dispose(): void {
+        // Clean up all polling intervals
+        this.clearAllPollingIntervals();
+        
+        // Dispose of audio player and output channel
         this.audioPlayer.dispose();
         this.outputChannel.dispose();
     }

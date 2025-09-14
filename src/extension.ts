@@ -29,17 +29,26 @@ export function activate(context: vscode.ExtensionContext) {
     function updateStatusBar() {
         const config = vscode.workspace.getConfiguration('codebeat');
         const isEnabled = config.get('enabled', true);
+        const isMuted = sunoClient.getMuteStatus();
         
-        if (isEnabled) {
-            statusBarItem.text = '$(unmute) CodeBeat';
-            statusBarItem.tooltip = 'CodeBeat is playing - Click to stop';
-            statusBarItem.command = 'codebeat.stop';
-            statusBarItem.backgroundColor = undefined;
-        } else {
-            statusBarItem.text = '$(mute) CodeBeat';
-            statusBarItem.tooltip = 'CodeBeat is stopped - Click to play';
+        if (!isEnabled) {
+            // Extension is disabled
+            statusBarItem.text = '$(debug-pause) CodeBeat';
+            statusBarItem.tooltip = 'CodeBeat is disabled - Click to enable';
             statusBarItem.command = 'codebeat.play';
             statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        } else if (isMuted) {
+            // Extension enabled but audio muted
+            statusBarItem.text = '$(mute) CodeBeat';
+            statusBarItem.tooltip = 'CodeBeat audio is muted - Click to unmute';
+            statusBarItem.command = 'codebeat.toggleAudio';
+            statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        } else {
+            // Extension enabled and audio playing
+            statusBarItem.text = '$(unmute) CodeBeat';
+            statusBarItem.tooltip = 'CodeBeat audio is playing - Click to mute';
+            statusBarItem.command = 'codebeat.toggleAudio';
+            statusBarItem.backgroundColor = undefined;
         }
         statusBarItem.show();
     }
@@ -66,7 +75,9 @@ export function activate(context: vscode.ExtensionContext) {
         const config = vscode.workspace.getConfiguration('codebeat');
         config.update('enabled', false, vscode.ConfigurationTarget.Global);
         
+        // Stop monitoring and audio playback
         codeMonitor.stopMonitoring();
+        sunoClient.stopAudio();
         updateStatusBar();
         
         vscode.window.showInformationMessage('⏹️ CodeBeat stopped');
@@ -82,6 +93,7 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showInformationMessage('🎵 CodeBeat enabled');
         } else {
             codeMonitor.stopMonitoring();
+            sunoClient.stopAudio(); // Stop audio when disabling
             vscode.window.showInformationMessage('⏹️ CodeBeat disabled');
         }
         
@@ -94,6 +106,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const toggleAudioCommand = vscode.commands.registerCommand('codebeat.toggleAudio', () => {
         sunoClient.toggleAudio();
+        updateStatusBar(); // Update status bar to reflect mute status change
     });
 
     // Add disposables to context
