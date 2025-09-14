@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { TandemApiClient } from './tandemApiClient';
 import { MusicParameterGenerator } from './musicParameterGenerator';
-import { SunoMockClient } from './sunoMockClient';
+import { SunoApiClient } from './sunoApiClient';
 
 export class CodeMonitor implements vscode.Disposable {
     private disposables: vscode.Disposable[] = [];
@@ -12,7 +12,7 @@ export class CodeMonitor implements vscode.Disposable {
     constructor(
         private tandemClient: TandemApiClient,
         private musicGenerator: MusicParameterGenerator,
-        private sunoMock: SunoMockClient
+        private sunoApiClient: SunoApiClient
     ) {}
 
     public startMonitoring(): void {
@@ -130,8 +130,13 @@ export class CodeMonitor implements vscode.Disposable {
                     content.split('\n').length
                 );
 
-                // Send to Suno (mock) API
-                await this.sunoMock.generateMusic(musicParams, 'code_analysis');
+                // Send to Suno (mock) API with code context
+                const codeContext = {
+                    code: content,
+                    language: languageId,
+                    fileName: document.fileName
+                };
+                await this.sunoApiClient.generateMusic(musicParams, 'code_analysis', codeContext);
 
                 console.log(`CodeBeat: Generated music for ${languageId} code complexity`);
             }

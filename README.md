@@ -15,6 +15,7 @@ Programming in silence is like dancing without music - technically possible but 
 - 🎉 **Success Celebrations**: Compilation successes trigger musical drops
 - 🐛 **Error Feedback**: Bug detection changes tempo and mood
 - 🌊 **Flow State**: Seamless background music that enhances focus
+- 🎛️ **Quick Controls**: Status bar play/stop controls for instant music management
 
 ## How It Works
 
@@ -153,6 +154,26 @@ The extension only reads this information locally and sends anonymized code patt
 
 ## Configuration & Usage
 
+### Quick Controls (NEW!)
+
+**🎛️ Status Bar Control**
+- **Location**: Bottom-left corner of VS Code
+- **Visual States**: 
+  - 🔊 CodeBeat (Playing) - Click to stop
+  - 🔇 CodeBeat (Stopped) - Click to play  
+- **Instant Control**: Single click to toggle music on/off
+- **Visual Feedback**: Status bar color changes with state
+
+**⌨️ Keyboard Shortcuts**
+- **Windows/Linux**: `Ctrl+Shift+M` - Toggle CodeBeat
+- **macOS**: `Cmd+Shift+M` - Toggle CodeBeat
+
+**🎮 Command Palette**
+- `CodeBeat: Play` - Start music generation
+- `CodeBeat: Stop` - Stop music generation  
+- `CodeBeat: Toggle CodeBeat` - Switch between play/stop
+- `CodeBeat: Trigger Celebration` - Manual celebration
+
 ### Extension Settings
 - **Enable/Disable**: Toggle CodeBeat on/off
 - **Volume Control**: Adjust music volume (0-100%)
@@ -163,8 +184,10 @@ The extension only reads this information locally and sends anonymized code patt
 1. Install CodeBeat extension from VSCode marketplace
 2. Configure API keys for Tandemn and Suno services
 3. Ensure you have a TypeScript development environment for the extension
-4. Start coding - music will automatically adapt to your workflow
-5. Celebrate when your code compiles successfully! 🎉
+4. **Look for the CodeBeat control in the bottom-left status bar** 🎛️
+5. Start coding - music will automatically adapt to your workflow
+6. Use status bar or `Cmd+Shift+M` to control music playback
+7. Celebrate when your code compiles successfully! 🎉
 
 **Development Notes:**
 - Extension must be built using TypeScript

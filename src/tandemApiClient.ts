@@ -29,6 +29,24 @@ export class TandemApiClient {
             const prompt = this.createAnalysisPrompt(code, languageId, fileExtension);
 
             console.log('CodeBeat: Sending code to Tandemn API for analysis...');
+            console.log('\n🔄 === TANDEM API REQUEST ===');
+            console.log('📄 Raw Code Content Being Analyzed:');
+            console.log('Language:', languageId);
+            console.log('Extension:', fileExtension);
+            console.log('Code Length:', code.length, 'characters');
+            console.log('Code Lines:', code.split('\n').length);
+            console.log('--- CODE START ---');
+            console.log(code);
+            console.log('--- CODE END ---');
+            console.log('\n📤 Full Prompt Being Sent to Tandem:');
+            console.log(prompt);
+            console.log('\n📡 Request Payload:');
+            console.log(JSON.stringify({
+                model: this.model,
+                messages: [{ role: 'user', content: prompt }],
+                temperature: 0.3,
+                max_tokens: 10000
+            }, null, 2));
 
             const response = await fetch(this.baseUrl, {
                 method: 'POST',
@@ -52,15 +70,19 @@ export class TandemApiClient {
 
             const data = await response.json();
             
-            // Log the raw API response
-            console.log('CodeBeat: Raw Tandem API response:', JSON.stringify(data, null, 2));
+            console.log('\n📥 === TANDEM API RESPONSE ===');
+            console.log('Status:', response.status, response.statusText);
+            console.log('Raw Tandem API Response:');
+            console.log(JSON.stringify(data, null, 2));
             
             if (!data.choices || !data.choices[0] || !data.choices[0].message) {
                 throw new Error('Invalid response format from Tandemn API');
             }
 
             const analysisText = data.choices[0].message.content;
-            console.log('CodeBeat: Received analysis text from Tandemn API:', analysisText);
+            console.log('\n📊 Analysis Text from Tandem:');
+            console.log(analysisText);
+            console.log('\n=== END TANDEM RESPONSE ===\n');
 
             // Parse the analysis response
             return this.parseAnalysisResponse(analysisText, languageId);

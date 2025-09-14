@@ -5,7 +5,7 @@ import { DiagnosticTracker } from './diagnosticTracker';
 import { TandemApiClient } from './tandemApiClient';
 import { MusicParameterGenerator } from './musicParameterGenerator';
 import { SuccessDetectionSystem } from './successDetectionSystem';
-import { SunoMockClient } from './sunoMockClient';
+import { SunoApiClient } from './sunoApiClient';
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('CodeBeat extension is now active!');
@@ -13,12 +13,38 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize core components
     const tandemClient = new TandemApiClient();
     const musicGenerator = new MusicParameterGenerator();
-    const sunoMock = new SunoMockClient();
+    const sunoClient = new SunoApiClient();
     
-    const codeMonitor = new CodeMonitor(tandemClient, musicGenerator, sunoMock);
+    const codeMonitor = new CodeMonitor(tandemClient, musicGenerator, sunoClient);
     const terminalListener = new TerminalListener();
-    const diagnosticTracker = new DiagnosticTracker(musicGenerator, sunoMock);
-    const successDetectionSystem = new SuccessDetectionSystem(sunoMock);
+    const diagnosticTracker = new DiagnosticTracker(musicGenerator, sunoClient);
+    const successDetectionSystem = new SuccessDetectionSystem(sunoClient);
+
+    // Create status bar item
+    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    statusBarItem.name = 'CodeBeat Control';
+    
+    let isPlaying = true; // Extension starts enabled by default
+    
+    function updateStatusBar() {
+        const config = vscode.workspace.getConfiguration('codebeat');
+        const isEnabled = config.get('enabled', true);
+        
+        if (isEnabled) {
+            statusBarItem.text = '$(unmute) CodeBeat';
+            statusBarItem.tooltip = 'CodeBeat is playing - Click to stop';
+            statusBarItem.command = 'codebeat.stop';
+            statusBarItem.backgroundColor = undefined;
+        } else {
+            statusBarItem.text = '$(mute) CodeBeat';
+            statusBarItem.tooltip = 'CodeBeat is stopped - Click to play';
+            statusBarItem.command = 'codebeat.play';
+            statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        }
+        statusBarItem.show();
+    }
+    
+    updateStatusBar();
 
     // Set up event listeners and monitoring
     codeMonitor.startMonitoring();
@@ -26,20 +52,40 @@ export function activate(context: vscode.ExtensionContext) {
     diagnosticTracker.startTracking();
 
     // Register commands
+    const playCommand = vscode.commands.registerCommand('codebeat.play', () => {
+        const config = vscode.workspace.getConfiguration('codebeat');
+        config.update('enabled', true, vscode.ConfigurationTarget.Global);
+        
+        codeMonitor.startMonitoring();
+        updateStatusBar();
+        
+        vscode.window.showInformationMessage('🎵 CodeBeat started playing');
+    });
+
+    const stopCommand = vscode.commands.registerCommand('codebeat.stop', () => {
+        const config = vscode.workspace.getConfiguration('codebeat');
+        config.update('enabled', false, vscode.ConfigurationTarget.Global);
+        
+        codeMonitor.stopMonitoring();
+        updateStatusBar();
+        
+        vscode.window.showInformationMessage('⏹️ CodeBeat stopped');
+    });
+
     const toggleCommand = vscode.commands.registerCommand('codebeat.toggle', () => {
         const config = vscode.workspace.getConfiguration('codebeat');
         const isEnabled = config.get('enabled', true);
         config.update('enabled', !isEnabled, vscode.ConfigurationTarget.Global);
         
-        vscode.window.showInformationMessage(
-            `CodeBeat ${!isEnabled ? 'enabled' : 'disabled'}`
-        );
-        
         if (!isEnabled) {
             codeMonitor.startMonitoring();
+            vscode.window.showInformationMessage('🎵 CodeBeat enabled');
         } else {
             codeMonitor.stopMonitoring();
+            vscode.window.showInformationMessage('⏹️ CodeBeat disabled');
         }
+        
+        updateStatusBar();
     });
 
     const celebrateCommand = vscode.commands.registerCommand('codebeat.celebrateNow', () => {
@@ -48,8 +94,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Add disposables to context
     context.subscriptions.push(
+        playCommand,
+        stopCommand,
         toggleCommand,
         celebrateCommand,
+        statusBarItem,
         codeMonitor,
         terminalListener,
         diagnosticTracker

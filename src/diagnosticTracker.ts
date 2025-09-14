@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { MusicParameterGenerator } from './musicParameterGenerator';
-import { SunoMockClient } from './sunoMockClient';
+import { SunoApiClient } from './sunoApiClient';
 
 export interface DiagnosticSummary {
     errorCount: number;
@@ -20,7 +20,7 @@ export class DiagnosticTracker implements vscode.Disposable {
 
     constructor(
         private musicGenerator: MusicParameterGenerator,
-        private sunoMockClient: SunoMockClient
+        private sunoApiClient: SunoApiClient
     ) {}
 
     public startTracking(): void {
@@ -175,8 +175,16 @@ export class DiagnosticTracker implements vscode.Disposable {
                 previous?.errorCount
             );
 
+            // Get current code context for diagnostic feedback
+            const activeEditor = vscode.window.activeTextEditor;
+            const codeContext = activeEditor ? {
+                code: activeEditor.document.getText(),
+                language: activeEditor.document.languageId,
+                fileName: activeEditor.document.fileName
+            } : undefined;
+
             // Send to Suno (mock) API
-            await this.sunoMockClient.generateMusic(musicParams, 'error_feedback');
+            await this.sunoApiClient.generateMusic(musicParams, 'error_feedback', codeContext);
 
             console.log(`CodeBeat: Generated diagnostic feedback music - ${current.errorCount} errors, ${current.warningCount} warnings`);
 
@@ -190,7 +198,7 @@ export class DiagnosticTracker implements vscode.Disposable {
         if (previous.errorCount > 0 && current.errorCount === 0) {
             console.log('CodeBeat: All errors resolved - triggering bug fix celebration!');
             
-            this.sunoMockClient.generateCelebration('bug_fix', `Fixed ${previous.errorCount} errors`);
+            this.sunoApiClient.generateCelebration('bug_fix', `Fixed ${previous.errorCount} errors`);
             
             vscode.window.showInformationMessage(
                 `🐛✨ CodeBeat: All errors resolved! Fixed ${previous.errorCount} error(s)`

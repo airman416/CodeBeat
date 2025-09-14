@@ -3,6 +3,7 @@ import { MusicParameters } from './musicParameterGenerator';
 import fetch from 'node-fetch';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as dotenv from 'dotenv';
 
 export interface SunoApiRequest {
     prompt: string;
@@ -21,12 +22,19 @@ export interface SunoApiRequest {
 
 export interface SunoApiResponse {
     id: string;
-    status: string;
+    status: 'submitted' | 'queued' | 'streaming' | 'complete' | 'error';
     audio_url?: string;
+    title?: string;
+    image_url?: string;
+    created_at?: string;
     metadata: {
         bpm: number;
         genre: string;
         duration: number;
+        tags?: string;
+        prompt?: string;
+        error_type?: string;
+        error_message?: string;
     };
 }
 
@@ -34,7 +42,7 @@ export class SunoApiClient {
     private lastGeneratedId: number = 0;
     private outputChannel: vscode.OutputChannel;
     private apiToken: string | undefined;
-    private readonly baseUrl = 'https://api.suno.com/v1';
+    private readonly baseUrl = 'https://studio-api.prod.suno.com/api/v2/external/hackmit';
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('CodeBeat - Suno API');
@@ -55,27 +63,44 @@ export class SunoApiClient {
 
     private loadEnvVars(): void {
         try {
-            // Try to load from .env file in workspace root
+            // Try to load from .env file in workspace root using dotenv
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (workspaceFolders && workspaceFolders.length > 0) {
                 const envPath = path.join(workspaceFolders[0].uri.fsPath, '.env');
+                
+                this.outputChannel.appendLine(`📁 Looking for .env file at: ${envPath}`);
+                
                 if (fs.existsSync(envPath)) {
-                    const envContent = fs.readFileSync(envPath, 'utf8');
-                    const envLines = envContent.split('\n');
+                    this.outputChannel.appendLine(`✅ Found .env file, loading...`);
                     
-                    for (const line of envLines) {
-                        const trimmedLine = line.trim();
-                        if (trimmedLine.startsWith('SUNO_API_TOKEN=')) {
-                            this.apiToken = trimmedLine.split('=')[1].trim();
-                            break;
+                    // Use dotenv to parse the file
+                    const result = dotenv.config({ path: envPath });
+                    
+                    if (result.error) {
+                        this.outputChannel.appendLine(`❌ Error parsing .env file: ${result.error}`);
+                    } else {
+                        this.outputChannel.appendLine(`✅ Loaded .env file successfully`);
+                        
+                        // Get the token from the parsed environment
+                        this.apiToken = result.parsed?.SUNO_API_TOKEN;
+                        
+                        if (this.apiToken) {
+                            this.outputChannel.appendLine(`✅ SUNO_API_TOKEN found in .env file`);
+                        } else {
+                            this.outputChannel.appendLine(`⚠️  SUNO_API_TOKEN not found in .env file`);
                         }
                     }
+                } else {
+                    this.outputChannel.appendLine(`❌ .env file not found at: ${envPath}`);
                 }
+            } else {
+                this.outputChannel.appendLine(`❌ No workspace folders found`);
             }
             
             // Fallback to process.env if available
             if (!this.apiToken && process.env.SUNO_API_TOKEN) {
                 this.apiToken = process.env.SUNO_API_TOKEN;
+                this.outputChannel.appendLine(`✅ SUNO_API_TOKEN found in process.env`);
             }
         } catch (error) {
             this.outputChannel.appendLine(`❌ Error loading environment variables: ${error}`);
@@ -174,14 +199,11 @@ export class SunoApiClient {
             'User-Agent': 'CodeBeat-VSCode-Extension/1.0.0'
         };
 
-        // Convert our request format to match actual Suno API format
+        // Convert our request format to match HackMIT Suno API format
         const apiPayload = {
-            prompt: request.prompt,
+            topic: `${request.prompt} in ${request.genre} style at ${request.bpm} BPM`,
             tags: request.tags.join(', '),
-            title: `CodeBeat - ${request.genre} (${request.bpm} BPM)`,
-            make_instrumental: request.make_instrumental,
-            model_version: request.model_version,
-            wait_audio: request.wait_audio
+            make_instrumental: request.make_instrumental
         };
 
         this.outputChannel.appendLine(`🌐 Making API call to ${this.baseUrl}/generate`);

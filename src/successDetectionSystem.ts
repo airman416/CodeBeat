@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SunoMockClient } from './sunoMockClient';
+import { SunoApiClient } from './sunoApiClient';
 
 export interface SuccessEvent {
     type: 'terminal_output' | 'task_success' | 'diagnostic_improvement' | 'file_system' | 'manual';
@@ -116,7 +116,7 @@ export class SuccessDetectionSystem {
         }
     ];
 
-    constructor(private sunoMockClient: SunoMockClient) {
+    constructor(private sunoApiClient: SunoApiClient) {
         this.setupFileSystemWatcher();
     }
 
@@ -158,7 +158,7 @@ export class SuccessDetectionSystem {
 
         // Generate celebration music
         const contextString = context ? JSON.stringify(context) : undefined;
-        this.sunoMockClient.generateCelebration(celebrationType, contextString);
+        this.sunoApiClient.generateCelebration(celebrationType, contextString);
 
         // Show user notification
         this.showCelebrationNotification(celebrationType, description);

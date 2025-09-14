@@ -7,6 +7,7 @@
 1. Open this project in VSCode
 2. Press `F5` to launch a new Extension Development Host window
 3. The CodeBeat extension will automatically activate
+4. **Look for the CodeBeat control in the bottom-left status bar** 🎛️
 
 ### 2. Monitor Code Analysis
 
@@ -31,13 +32,39 @@
 2. Run "CodeBeat: Trigger Celebration"
 3. See celebration music generation
 
+### 3.5. Test New Controls (NEW!)
+
+#### Status Bar Control:
+1. Look at the bottom-left of VS Code for the CodeBeat status bar item
+2. **Playing State**: Shows `🔊 CodeBeat` with normal background
+3. **Stopped State**: Shows `🔇 CodeBeat` with warning background  
+4. Click the status bar item to toggle between play/stop
+5. Watch for notification messages when state changes
+
+#### Keyboard Shortcuts:
+1. Press `Cmd+Shift+M` (Mac) or `Ctrl+Shift+M` (Windows/Linux)
+2. This toggles CodeBeat on/off instantly
+3. Works from any editor window
+
+#### Command Palette:
+1. Use `Cmd+Shift+P` to open Command Palette
+2. Try these new commands:
+   - **CodeBeat: Play** - Start music generation
+   - **CodeBeat: Stop** - Stop music generation
+   - **CodeBeat: Toggle CodeBeat** - Switch between states
+
 ### 4. Configuration
 
 Access CodeBeat settings:
-- `codebeat.enabled` - Enable/disable the extension
+- `codebeat.enabled` - Enable/disable the extension (also controlled by status bar)
 - `codebeat.volume` - Music volume (0-100%)
 - `codebeat.celebrationDrops` - Enable success celebrations
 - `codebeat.analysisSensitivity` - Analysis frequency (ms)
+
+**Quick Control Options:**
+- **Status Bar**: Click the CodeBeat item in bottom-left
+- **Keyboard**: `Cmd+Shift+M` or `Ctrl+Shift+M`
+- **Commands**: Use Command Palette for play/stop/toggle
 
 ### 5. Output Monitoring
 
@@ -90,3 +117,19 @@ Context: code_analysis
 - **Deployment**: Full orchestral finale (140 BPM)
 
 The extension intelligently detects your coding context and generates appropriate music parameters that would create the perfect soundtrack for your development workflow!
+
+## What's New: Status Bar Controls 🎛️
+
+**v1.1.0 Updates:**
+- **🎮 Status Bar Control**: Instant play/stop button in VS Code's bottom-left corner
+- **⌨️ Keyboard Shortcut**: `Cmd+Shift+M` (Mac) or `Ctrl+Shift+M` (Windows/Linux) for quick toggle
+- **🎯 Visual Feedback**: Status bar shows current state with icons and color changes
+- **📱 User-Friendly**: No more hunting through menus - control music with a single click
+- **🔄 Smart State**: Remembers your preference and updates all controls in sync
+
+**Easy Testing:**
+1. Launch the extension development host (`F5`)
+2. Look for `🔊 CodeBeat` in the bottom-left status bar
+3. Click it to toggle between play (`🔊`) and stop (`🔇`) states
+4. Try the keyboard shortcut for instant control
+5. Watch the notification messages and status bar color changes
